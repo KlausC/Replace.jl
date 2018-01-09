@@ -129,7 +129,7 @@ replace = replace_kcon
         @test replace(s, r"[aeiou]" => "ä", "ui" => "ki", "i" => "I") == "qkick qkickär qkickäst"
         @test replace(s, r"[^ ]+" => "word", "quicker " => "X", count=big"99") == "word Xword"
 
-        @test replace(s, r"(quick)(e)"=>s"\2-\1", "x"=>"X") == "quick e-quickr e-quick-st" 
+        @test replace(s, r"(quick)(e)"=>s"\2-\1", "x"=>"X") == "quick e-quickr e-quickst" 
 
         @test replace(s, 'q'=>'Q', 'u'=>'U') == "QUick QUicker QUickest"
         @test replace(s, 'q'=>'Q', r"u"=>'U') == "QUick QUicker QUickest"

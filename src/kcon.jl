@@ -24,7 +24,6 @@ function findfunc(p::Pair{Nothing,<:Vector{<:Pair}})
             cs = string(c)
             for pp in pairs
                 pf = pp.first
-                println("c='$c' pp $pp")
                 if pf isa Char
                     c == pf && return i, i, pp
                 else
@@ -153,7 +152,27 @@ end
 # The search moves forward through s exactly once for each pair
 # If no match is found for a pair, it is removed from the list
 #
-function findnextall(fun::Vector{Function}, prp::Vector{Pair}, rv1::Vector{Int}, rv2::Vector{Int}, s::AbstractString)
+function findnextall(fun::Vector{Function}, prp::Vector{Pair}, rv1::Vector{Int}, rv2::Vector{Int}, s::AbstractString, start::Int)
+
+    n = length(fun)
+    if n > 0
+        # new find for all matches that started before start (outdated)
+        for i = 1:n
+            if rv1[i] < start #overlap
+                # new search starting one after
+                rv1[i], rv2[i], prp[i] = fun[i](s, start)
+            end
+        end
+        # remove all pairs without matching patterns
+        for i = n:-1:1
+            if rv1[i] <= 0
+                deleteat!(fun, i)
+                deleteat!(prp, i)
+                deleteat!(rv1, i)
+                deleteat!(rv2, i)
+            end
+        end
+    end
 
     n = length(fun)
     if n == 0
@@ -173,22 +192,6 @@ function findnextall(fun::Vector{Function}, prp::Vector{Pair}, rv1::Vector{Int},
         end
         # next match at minstart:minend for pat_repl with original index minp
 
-        nexttome = nextind(s, minend)
-        for i = 1:n
-            if rv1[i] <= minend #overlap
-                # new search starting one after minend
-                rv1[i], rv2[i], prp[i] = fun[i](s, nexttome)
-            end
-        end
-        # remove all pairs without matching patterns
-        for i = n:-1:1
-            if rv1[i] == 0
-                deleteat!(fun, i)
-                deleteat!(prp, i)
-                deleteat!(rv1, i)
-                deleteat!(rv2, i)
-            end
-        end
         minstart, minend, minp
     end
 end
@@ -199,12 +202,8 @@ function replace_kcon(str::String, pat_repls::Pair...; count::Integer=typemax(In
         return str
     end
     count < 0 && throw(DomainError(count, "`count` must be non-negative."))
-    # the following 4 vectors are kept parallel (corresponding elements)
-    fun = Vector{Function}() # pending functions to call
-    prp = Vector{Pair}()     # pattern-repl-pair being processed
-    rv1 = Vector{Int}()      # next match start - 0 means no more match
-    rv2 = Vector{Int}()      # next match end
 
+    # transform and condense pat_repl patterns to pairs
     pairs = build_regex(pat_repls)
     n = length(pairs)
     n == 0 && return str
@@ -214,24 +213,20 @@ function replace_kcon(str::String, pat_repls::Pair...; count::Integer=typemax(In
             return replace(str, pair, count=count) # special for one pair
         end
     end
+    
+    # the following 4 vectors are kept parallel (corresponding elements)
+    fun = Vector{Function}(findfunc.(pairs))# pending functions to call
+    prp = Vector{Pair}(uninitialized, n)    # pattern-repl-pair being processed
+    rv1 = zeros(Int, n)                     # next match start - 0 means no more match
+    rv2 = Vector{Int}(uninitialized, n)     # next match end
 
-    for pair in pairs
-        f = findfunc(pair)
-        r1, r2, rp = f(str, 1) # initial setting for start of str
-        if r1 > 0
-            push!(fun, f)
-            push!(prp, rp)
-            push!(rv1, r1)
-            push!(rv2, r2)
-        end
-    end
-    n = 1
     eos = endof(str)
     i = a = start(str)
-    j, k, ind = findnextall(fun, prp, rv1, rv2, str)
+    j, k, ind = findnextall(fun, prp, rv1, rv2, str, i)
     out = IOBuffer(StringVector(sizeof(str)*12÷10), true, true)
     out.size = 0
     out.ptr = 1
+    n = 1
     while j != 0 && n <= count
         if i == a || i <= k
             unsafe_write(out, pointer(str, i), UInt(j-i))
@@ -245,7 +240,7 @@ function replace_kcon(str::String, pat_repls::Pair...; count::Integer=typemax(In
         else
             i = k = nextind(str, k)
         end
-        j, k, ind = findnextall(fun, prp, rv1, rv2, str)
+        j, k, ind = findnextall(fun, prp, rv1, rv2, str, k)
         n += 1
     end
     write(out, SubString(str, i))
