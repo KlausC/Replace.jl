@@ -19,16 +19,19 @@ function findfunc(p::Pair{Nothing,<:Vector{<:Pair}})
     pairs = p.second
     (s::AbstractString, i::Int) -> begin
         ends = endof(s)
+        n = length(pairs)
         while i <= ends
             c = s[i]
-            cs = string(c)
-            for pp in pairs
+            j = 1
+            while j <= n
+                pp = pairs[j]
                 pf = pp.first
                 if pf isa Char
                     c == pf && return i, i, pp
                 else
                     pf(c) && return i, i, pp
                 end
+                j += 1
             end
             i = nextind(s, i)
         end
@@ -65,12 +68,12 @@ function pushpat!(pair::Pair{<:AbstractString}, pairs, st, d, singles)
     ps = pair.second
     pushrx!(pf, pair.second, st, d) && length(pf) == 1 && push!(singles, pf[1]=>ps)
 end
-function pushpat!(pair::Pair{<:Union{Tuple{Vararg{Char}},AbstractVector{Char},Set{Char}}}, pairs, st, di, singles)
+function pushpat!(pair::Pair{<:Union{Tuple{Vararg{Char}},AbstractVector{Char},Set{Char}}}, pairs, st, d, singles)
     
     pat = pair.first
     ps = pair.second
     if length(pat) == 1
-        pushpat!(first(pat)=>ps, pairs, st, di, singles)
+        pushpat!(first(pat)=>ps, pairs, st, d, singles)
     else
         for c in pat
             pushrx!(string(c), ps, st, d) &&
@@ -109,7 +112,15 @@ function build_regex(pat_repls::NTuple{N,Pair}) where N
     d = Dict{String,Any}()
     singles = Vector{Pair}()
 
-    for pair in pat_repls
+    for i = 1:N
+        pair = pat_repls[i]
+        #= TODO the following lines create Segmentation fault
+        # Julia Version 0.7.0-DEV.3354
+        # Commit 9b5eed2b6c* (2018-01-09 08:03 UTC)
+        if pair.second isa Char
+            pair = Pair(pair.first, pair.second)
+        end
+        =#
         pushpat!(pair, pairs, st, d, singles)
     end
 
@@ -196,29 +207,46 @@ function findnextall(fun::Vector{Function}, prp::Vector{Pair}, rv1::Vector{Int},
     end
 end
 
+mutable struct ReplaceCache
+    state::Int  # 0: invalid, 1 valid pat_repls, pairs, fun
+    pat_repls::NTuple{N,Pair} where N
+    pairs::Vector{Pair}
+    fun::Vector{Function}  # pending functions to call
+    ReplaceCache() = new(0)
+end
+
+reset!(c::ReplaceCache) = c.state = 0
+
 # cover the multiple pairs case
-function replace_kcon(str::String, pat_repls::Pair...; count::Integer=typemax(Int))
+function replace_kcon(str::String, pat_repls::Pair...; count::Integer=typemax(Int), cache::ReplaceCache=ReplaceCache())
+
     if count == 0 || length(pat_repls) == 0
         return str
     end
     count < 0 && throw(DomainError(count, "`count` must be non-negative."))
 
-    # transform and condense pat_repl patterns to pairs
-    pairs = build_regex(pat_repls)
-    n = length(pairs)
-    n == 0 && return str
-    if n == 1
-        pair = pairs[1]
+    if cache.state == 0
+        # transform and condense pat_repl patterns to pairs
+        cache.pat_repls = pat_repls
+        cache.pairs = build_regex(pat_repls)
+        cache.fun = Vector{Function}(findfunc.(cache.pairs))
+        cache.state = 1
+    end
+
+    n = length(cache.pairs)
+    if n <= 1
+        n == 0 && return str
+        pair = cache.pairs[1]
         if pair.first != nothing
             return replace(str, pair, count=count) # special for one pair
         end
     end
-    
+
     # the following 4 vectors are kept parallel (corresponding elements)
-    fun = Vector{Function}(findfunc.(pairs))# pending functions to call
-    prp = Vector{Pair}(uninitialized, n)    # pattern-repl-pair being processed
-    rv1 = zeros(Int, n)                     # next match start - 0 means no more match
-    rv2 = Vector{Int}(uninitialized, n)     # next match end
+    fun = copy(cache.fun)   # pending function calls
+    prp = Vector{Pair}(uninitialized, n) # pattern-repl-pair being processed
+    rv1 = zeros(Int, n)     # next match start - 0 means no more match
+    rv2 = zeros(Int, n)     # next match start - 0 means no more match
 
     eos = endof(str)
     i = a = start(str)
@@ -247,6 +275,7 @@ function replace_kcon(str::String, pat_repls::Pair...; count::Integer=typemax(In
     String(take!(out))
 end
 
+#=
 # The following is dedicated to single pat-repl.
 # replace Char with function that compares with this Char
 predicatepair(p::Pair{Char}) = equalto(p.first) => p.second
@@ -257,3 +286,4 @@ function predicatepair(p::Pair{<:Union{Tuple{Vararg{Char}},AbstractVector{Char},
 end
 predicatepair(p::Pair) = p
 
+=#
