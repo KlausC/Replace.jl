@@ -1,10 +1,15 @@
 module Replace
 
-export replace_sjreg, replace_sjon, replace_kcon
+export replace_sjreg, replace_sjon, replace_kcon, replace_kcun, replace_j
 
-#include("util.jl")
+using Unicode
+
+include("kctest.jl")
+# include("kcan.jl")
+include("kcun.jl")
 include("kcon.jl")
 include("sjon.jl")
 include("sjreg.jl")
+include("util.jl")
 
 end # module
