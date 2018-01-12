@@ -1,4 +1,5 @@
 
+export replace_kcun
 import Base.Callable
 
 const TF = Union{String,Callable,Regex}

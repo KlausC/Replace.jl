@@ -1,3 +1,6 @@
+
+export replace_kcon
+
 # specialized search function for Char
 function findfunc(p::Pair{Char})
     (s::AbstractString, i::Int) -> begin

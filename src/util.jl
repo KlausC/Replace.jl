@@ -1,3 +1,4 @@
+export replace_j
 
 _replace(io, repl, str, r, pattern) = print(io, repl)
 _replace(io, repl::Function, str, r, pattern) =

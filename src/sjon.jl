@@ -1,3 +1,4 @@
+export replace_sjon
 import Base: _replace, StringVector
 
 # replace Char with function that compares with this Char
