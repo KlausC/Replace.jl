@@ -23,17 +23,18 @@ function Base.isempty(ra::Agent)
     ra.j == 0 
 end
 
-function getnext(ra::Agent, maps::Vector{<:Pair{<:TF,<:TS}},s::String, ii::Int)
-    # dicard all overlapping entries
-    n = length(ra.r1)
-    ra.j == 0 && return (0, -1)
-    ra.j >= ii && return (ra.j, ra.k)
+function getnext(ra::Agent, mapp::Vector{TF}, s::String, ii::Int)
+    if ra.j == 0 || ra.j >= ii
+        return (ra.j, ra.k)
+    end
     pos = ra.pos + 1
+    n = length(ra.r1)
+    # dicard all overlapping entries
     while pos <= n && 0 < ra.r1[pos] < ii
         pos += 1
     end
     if pos > n
-        _findnext!(maps[ra.id], ra, s, ii)
+        _findnext!(mapp[ra.id], ra, s, ii)
         # point of type unstability - for big n negligible
         ra.pos = pos = 1
     end
@@ -43,11 +44,11 @@ function getnext(ra::Agent, maps::Vector{<:Pair{<:TF,<:TS}},s::String, ii::Int)
 end
 
 # The following functions should be type-stable
-function _findnext!(p::Pair{String}, ra::Agent, s::String, ii::Int) 
+function _findnext!(p::String, ra::Agent, s::String, ii::Int) 
     n = length(ra.r1)
     i = ii
     for pos = 1:n
-        j, k = findnext(first(p), s, i)
+        j, k = findnext(p, s, i)
         ra.r1[pos], ra.r2[pos] = j, k
         j <= 0 && break
         k = i == ii ? k : i
@@ -55,11 +56,11 @@ function _findnext!(p::Pair{String}, ra::Agent, s::String, ii::Int)
     end
 end
 
-function _findnext!(p::Pair{Regex}, ra::Agent, s::String, ii::Int) 
+function _findnext!(p::Regex, ra::Agent, s::String, ii::Int) 
     n = length(ra.r1)
     i = ii
     for pos = 1:n
-        j, k = findnext(first(p), s, i)
+        j, k = findnext(p, s, i)
         ra.r1[pos], ra.r2[pos] = j, k
         j <= 0 && break
         k = i == ii ? k : i
@@ -67,11 +68,11 @@ function _findnext!(p::Pair{Regex}, ra::Agent, s::String, ii::Int)
     end
 end
 
-function _findnext!(p::Pair{<:Callable}, ra::Agent, s::String, ii::Int)
+function _findnext!(p::Callable, ra::Agent, s::String, ii::Int)
     n = length(ra.r1)
     i = ii
     for pos = 1:n
-        j = findnext(first(p), s, i)
+        j = findnext(p, s, i)
         ra.r1[pos], ra.r2[pos] = j, j
         j <= 0 && break
         i = nextind(s, j)
@@ -90,7 +91,13 @@ function replace_kcan(str::String, pat_repls::Pair{<:TIF,<:TIS}...)
 
     n = length(pat_repls)
     # the following 4 vectors are kept parallel (corresponding elements)
-    maps::Vector{Pair{<:TF,<:TS}} = predicatepair_kcan.(collect(pat_repls))
+    # maps::Vector{Pair{<:TF,<:TS}} = predicatepair_kcan.(collect(pat_repls))
+    mapp = Vector{TF}(uninitialized, n)
+    mapr = Vector{TS}(uninitialized, n)
+
+    for ii = 1:n
+        mapp[ii], mapr[ii] = predicatepair_kcan(pat_repls[ii])
+    end
     prp::Vector{Agent} = Agent.(1:n, bufl)
     eos = endof(str)
     i::Int = 1
@@ -101,14 +108,14 @@ function replace_kcan(str::String, pat_repls::Pair{<:TIF,<:TIS}...)
     out.size = 0
     out.ptr = 1
     ctr = 1
-    minp = Pair("", "")
+    minp = 0
     while ctr <= count && n > 0
         
         minj::Int = typemax(Int)
         maxk::Int = -1
         for ii = 1:n
             ra = prp[ii]
-            j, k = getnext(ra, maps, str, i)
+            j, k = getnext(ra, mapp, str, i)
             if j > 0 && (j < minj || j == minj && k > maxk)
                 minj = j
                 maxk = k
@@ -132,7 +139,7 @@ function replace_kcan(str::String, pat_repls::Pair{<:TIF,<:TIS}...)
         j == 0 && break
         if i == sta || i <= k
             unsafe_write(out, pointer(str, i), UInt(j-i))
-            _replace1(out, maps[minp], str, j:k)
+            _replace1(out, mapp[minp], mapr[minp], str, j, k)
         end
         if k < j
             i = j
@@ -147,8 +154,14 @@ function replace_kcan(str::String, pat_repls::Pair{<:TIF,<:TIS}...)
     String(take!(out))
 end
 
-function _replace1(out::IO, p::Pair{<:TF,<:TS}, s, r)
-    _replace(out, last(p), s, r, first(p))
+function _replace1(out::IO, ::TF, repl::String, s, j, k)
+    print(out, repl)
+end
+function _replace1(out, ::TF, repl::Function, s, j, k)
+    print(out, repl(SubString(s, j, k)))
+end
+function _replace1(out::IO, pat::TF, repl::Base.SubstitutionString, s, j, k)
+    _replace(out, repl, s, j:k, pat)
 end
 
 # The following is dedicated to single pat-repl.
@@ -170,8 +183,8 @@ consol_repl(repl) = string(repl)
 # replace collection of Char with function that checks occurrence in this collection
 function predicatepair_kcan(p::Pair{<:TIF,<:TIS})::Pair{<:TF,<:TS}
     pat::TF  = consol_pattern(first(p))
-    repl::TS = consol_repl(last(p))
+    repl::TS = consol_repl(p.second)
     (repl isa Base.SubstitutionString) && !(pat isa Regex) && error("subs str req regex")
-    pat === first(p) && repl === last(p) ? p : (pat=>repl)
+    pat === p.first && repl === p.second ? p : (pat=>repl)
 end
 
