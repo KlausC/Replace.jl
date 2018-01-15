@@ -3,7 +3,8 @@ module Replace
 using Unicode
 
 include("kctest.jl")
-include("kcan.jl")
+# include("kcan.jl")
+include("kcbn.jl")
 include("kcun.jl")
 include("kcon.jl")
 include("sjon.jl")
