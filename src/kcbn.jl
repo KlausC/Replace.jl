@@ -1,82 +1,151 @@
 
-export replace_kcbn, Agent, write_funlist, ex_funlist
-import Base.Callable
+export replace_kcbn, write_funlist, ex_funlist
+import Base: Callable, SubstitutionString
 
 const TF = Union{String,Callable,Regex}
-const TS = Union{String,Callable,Base.SubstitutionString}
+const TS = Union{String,Callable,SubstitutionString}
 
 const TIF = Union{Char,AbstractString,Regex,Callable,Tuple{Vararg{Char}},AbstractVector{Char},Set{Char}}
-const TIS = Union{Char,AbstractString,Callable,Base.SubstitutionString}
+const TIS = Union{Char,AbstractString,Callable,SubstitutionString}
 
-mutable struct Agent
-    id::Int             # Index into original list of pattern-replacement pairs 
-    pos::Int            # previously read position or 0
-    j::Int              # current range.1
-    k::Int              # current range.2
-    r1::Vector{Int}     # pre-stored range.1    
-    r2::Vector{Int}     # pre-stored range.2
+const TYPE_STRING  = 1
+const TYPE_REGEX   = 2
+const TYPE_FUNC    = 3
 
-    Agent(id::Int, bufl::Int) = new(id, bufl+1, -1, 0, fill(0, bufl), fill(0, bufl))
+mutable struct PatternRepl
+    pattern_type::Int   # Any of the constants TYPE_ above 
+    repl_type::Int      # Any of the constants TYPE_ above
+    r1::Int             # pre-fetched range1
+    r2::Int             # pre-fetched range2
+    pat_string::String  # only if pattern_type == TYPE_STRING
+    pat_regex::Regex    #                              REGEX                     
+    pat_func::Callable  #                              FUNC 
+    rep_string::String  # only if repl_type == TYPE_STRING
+    rep_subs::SubstitutionString #                 _REGEX 
+    rep_func::Callable  #                          _FUNC 
+
+    PatternRepl(pt::Int, rt::Int) = new(pt, rt, 0, 0)
 end
 
-function Base.isempty(ra::Agent)
-    ra.j == 0 
+function PatternRepl(pat::String, repl::String)
+    pr = PatternRepl(TYPE_STRING, TYPE_STRING)
+    pr.pat_string = pat
+    pr.rep_string = repl
+    pr
 end
 
-function getnext(ra::Agent, mapp::Vector{TF}, s::String, ii::Int)
-    if ra.j == 0 || ra.j >= ii
-        return (ra.j, ra.k)
-    end
-    pos = ra.pos + 1
-    n = length(ra.r1)
-    # dicard all overlapping entries
-    while pos <= n && 0 < ra.r1[pos] < ii
-        pos += 1
-    end
-    if pos > n
-        _findnext!(mapp[ra.id], ra, s, ii)
-        # point of type unstability - for big n negligible
-        ra.pos = pos = 1
-    end
-    ra.pos = pos
-    ra.j, ra.k = ra.r1[pos], ra.r2[pos]
-    ra.j, ra.k
+function PatternRepl(pat::String, repl::Callable)
+    pr = PatternRepl(TYPE_STRING, TYPE_FUNC)
+    pr.pat_string = pat
+    pr.rep_func = repl
+    pr
 end
 
-# The following functions should be type-stable
-function _findnext!(p::String, ra::Agent, s::String, ii::Int) 
-    n = length(ra.r1)
-    i = ii
-    for pos = 1:n
-        j, k = findnext(p, s, i)
-        ra.r1[pos], ra.r2[pos] = j, k
-        j <= 0 && break
-        k = i == ii ? k : i
-        i = nextind(s, k)
-    end
+function PatternRepl(pat::Regex, repl::String)
+    pr = PatternRepl(TYPE_REGEX, TYPE_STRING)
+    pr.pat_regex = pat
+    pr.rep_string = repl
+    pr
 end
 
-function _findnext!(p::Regex, ra::Agent, s::String, ii::Int) 
-    n = length(ra.r1)
-    i = ii
-    for pos = 1:n
-        j, k = findnext(p, s, i)
-        ra.r1[pos], ra.r2[pos] = j, k
-        j <= 0 && break
-        k = i == ii ? k : i
-        i = nextind(s, k)
-    end
+function PatternRepl(pat::Regex, repl::SubstitutionString)
+    pr = PatternRepl(TYPE_REGEX, TYPE_REGEX)
+    pr.pat_regex = pat
+    pr.rep_subs = repl
+    pr
 end
 
-function _findnext!(p::Callable, ra::Agent, s::String, ii::Int)
-    n = length(ra.r1)
-    i = ii
-    for pos = 1:n
-        j = findnext(p, s, i)
-        ra.r1[pos], ra.r2[pos] = j, j
-        j <= 0 && break
-        i = nextind(s, j)
+function PatternRepl(pat::Regex, repl::Callable)
+    pr = PatternRepl(TYPE_REGEX, TYPE_FUNC)
+    pr.pat_regex = pat
+    pr.rep_func = repl
+    pr
+end
+
+function PatternRepl(pat::Callable, repl::String)
+    pr = PatternRepl(TYPE_FUNC, TYPE_STRING)
+    pr.pat_func = pat
+    pr.rep_string = repl
+    pr
+end
+
+function PatternRepl(pat::Callable, repl::Callable)
+    pr = PatternRepl(TYPE_FUNC, TYPE_FUNC)
+    pr.pat_func = pat
+    pr.rep_func = repl
+    pr
+end
+
+# code generation for all patterns
+function gen_pattern_all(prs::Vector{PatternRepl})
+    Expr(:block, [gen_pattern(i, prs[i]) for i in 1:length(prs)]...)
+end
+# code generation depending on pattern_type
+function gen_pattern(pri::Int, pr::PatternRepl)
+    if pr.pattern_type == TYPE_STRING
+        :(  let pr = prs[$pri], j = pr.r1, k;
+            if j < typemax(Int)
+                j, k = findnext_string(pr, str, pos)
+                $(gen_min_max(pri))
+            end
+        end
+        )
+    elseif pr.pattern_type == TYPE_REGEX
+        :(  let pr = prs[$pri], j = pr.r1, k;
+            if j < typemax(Int)
+               j, k = findnext_regex(pr, str, pos)
+               $(gen_min_max(pri))
+            end
+        end
+        )
+    elseif pr.pattern_type == TYPE_FUNC
+        :(  let j = $(getpr(1, pri)), k;
+            if j < typemax(Int)
+                if j < pos
+                    j = findnext($(pr.pat_func), str, pos)
+                    j = ifelse(j == nothing, typemax(Int), j)
+                    $(setpr(1, pri, :j))
+                    $(setpr(2, pri, :j))
+                end 
+                k = j
+                $(gen_min_max(pri))
+            end
+        end
+        ) 
     end
+end
+function gen_min_max(pri::Int)
+    :( if j < minj || ( j == minj && k > maxk)
+        minj, maxk = j, k
+        minp = $pri
+    end
+   )
+end
+
+getpr(k::Int, pri::Int) = Symbol("pr", k, "_", pri)
+setpr(k::Int, pri::Int, j) = Expr(:(=), getpr(k, pri), j)
+setprall(k::Int, n::Int) = [setpr(k, i, 0) for i = 1:n] 
+
+function findnext_string(pr::PatternRepl, str::String, cpos::Int)
+    j = pr.r1
+    if j < cpos
+        r = findnext(pr.pat_string, str, cpos)
+        j, k = first(r), last(r)
+        j = ifelse(j == 0, typemax(Int), j)
+        pr.r1, pr.r2 = j, k
+    end
+    j, k
+end
+
+function findnext_regex(pr::PatternRepl, str::String, cpos::Int)
+    j = pr.r1
+    if j < cpos
+        r = findnext(pr.pat_regex, str, cpos)
+        j, k = first(r), last(r)
+        j = ifelse(j == 0, typemax(Int), j)
+        pr.r1, pr.r2 = j, k
+    end
+    j, k
 end
 
 # cover the multiple pairs case
@@ -94,77 +163,41 @@ function replace_kcbn(str::String, pat_repls::Pair{<:TIF,<:TIS}...)
     # maps::Vector{Pair{<:TF,<:TS}} = predicatepair_kcan.(collect(pat_repls))
     mapp = Vector{TF}(uninitialized, n)
     mapr = Vector{TS}(uninitialized, n)
-
+    prs::Vector{PatternRepl} = Vector{PatternRepl}(uninitialized, n)
     for ii = 1:n
         mapp[ii], mapr[ii] = predicatepair_kcan(pat_repls[ii])
+        prs[ii] = PatternRepl(mapp[ii], mapr[ii])
     end
+    gen_all = gen_pattern_all(prs)
+
     ex = quote
-    let mapr=$mapr, mapp=$mapp, n=$n, bufl=$bufl, str=$str
-    prp::Vector{Agent} = Agent.(1:n, bufl)
-    eos = endof(str)
-    i::Int = 1
-    sta::Int = i
-    k::Int = i
-    j::Int = 0
-    out = IOBuffer(StringVector(sizeof(str)*12÷10), true, true)
-    out.size = 0
-    out.ptr = 1
-    minp = 0
-    ctr = 1
-    while ctr <= $count && n > 0
-        
-        minj::Int = typemax(Int)
-        maxk::Int = -1
-        for ii = 1:n
-            ra = prp[ii]
-            j, k = getnext(ra, mapp, str, i)
-            if j > 0 && (j < minj || j == minj && k > maxk)
-                minj = j
-                maxk = k
-                minp = ra.id
+    let str=$str, prs=$prs, $(setprall(1, n)...), $(setprall(2, n)...)
+        eos = sizeof(str)
+        pos::Int = 1
+        out = IOBuffer(StringVector(eos*12÷10), true, true)
+        out.size = 0
+        ctr = 1
+        while ctr <= $count && pos <= eos
+            
+            minj::Int = typemax(Int)
+            maxk::Int = -1
+            minp::Int = 0
+            $gen_all
+            maxk == -1 && break
+            if pos <= minj
+                unsafe_write(out, pointer(str, pos), UInt(minj-pos))
+                $(ex_funlist(mapp, mapr))
             end
+            pos = nextind(str, max(minj, maxk))
+            ctr += 1
         end
-        j = 0
-        for ii = 1:n
-            if !isempty(prp[ii])
-                j += 1
-                if ii > j
-                    prp[j] = prp[ii]
-                end
-            end
+        write(out, SubString(str, pos))
+        String(take!(out))
         end
-        resize!(prp, j)
-        n = j
-        (minj == 0 || maxk == -1) && break
-        j, k = minj, maxk
-        if i == sta || i <= k
-            unsafe_write(out, pointer(str, i), UInt(j-i))
-            $(ex_funlist(mapp, mapr))
-        end
-        if k < j
-            i = j
-            j > eos && break
-            k = nextind(str, j)
-        else
-            i = k = nextind(str, k)
-        end
-        ctr += 1
-    end
-    write(out, SubString(str, i))
-    String(take!(out))
-    end
     end
     eval(ex)
 end
  
-function write_funlist(mapp::Vector{TF}, mapr::Vector{TS})
-    ex = ex_funlist(mapp, mapr)
-    fun = eval(ex)
-    (out, i, s, j, k) -> begin
-        Base.invokelatest(fun, out, i, s, j, k) 
-    end
-end
-
 function ex_funlist(mapp::Vector{TF}, mapr::Vector{TS})
     n = length(mapp)
     list = Vector{Tuple}(); sizehint!(list, n)
@@ -185,18 +218,16 @@ function ex_funlist(mapp::Vector{TF}, mapr::Vector{TS})
     function ex_single(bop::Tuple)
         i, cf, op = bop
         if cf == 0
-            :(@inbounds write(out, $op(getindex(s, j:k))))
+            :(write(out, $op(getindex(str, minj:maxk))))
         elseif cf == 1
-            :(@inbounds write(out, $op(getindex(s, j))))
+            :(write(out, $op(getindex(str, minj))))
         elseif cf == 2
-            :(write(out, $op)) 
+            :(write(out, prs[$i].rep_string)) 
         elseif cf == 3
-            pat = bop[4]
-            :(_replace(out, $op, s, j:k, $pat))
+            :(_replace(out, prs[$i].rep_subs, str, minj:maxk, prs[$i].pat_regex))
         end
     end
     
-    # :((out::IO, i::Int, s::String, j::Int, k::Int) -> $(ex_if_elseif_end(ex_single, list)))
     ex_if_elseif_end(ex_single, list)
 end
 
