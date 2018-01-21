@@ -170,11 +170,14 @@ function replace_kcbn(str::String, pat_repls::Pair{<:TIF,<:TIS}...)
     end
     gen_all = gen_pattern_all(prs)
 
-    ex = quote
-    let str=$str, prs=$prs, $(setprall(1, n)...), $(setprall(2, n)...)
+    strf() = str
+
+    ex = quote (rstr::Ref{String}, prs::Vector{PatternRepl}) ->
+        let $(setprall(1, n)...), $(setprall(2, n)...)
+        str = rstr[]
         eos = sizeof(str)
         pos::Int = 1
-        out = IOBuffer(StringVector(eos*12÷10), true, true)
+        out = IOBuffer(StringVector(eos), true, true)
         out.size = 0
         ctr = 1
         while ctr <= $count && pos <= eos
@@ -195,7 +198,8 @@ function replace_kcbn(str::String, pat_repls::Pair{<:TIF,<:TIS}...)
         String(take!(out))
         end
     end
-    eval(ex)
+    fun = eval(ex)
+    Base.invokelatest(fun, Ref(str), prs)
 end
  
 function ex_funlist(mapp::Vector{TF}, mapr::Vector{TS})
