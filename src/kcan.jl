@@ -3,7 +3,7 @@ export replace_kcan, Agent
 import Base.Callable
 
 const TF = Union{String,Callable,Regex}
-const TS = Union{String,Callable,Base.SubstitutionString}
+const TS = Union{Char,String,Callable,Base.SubstitutionString}
 
 const TIF = Union{Char,AbstractString,Regex,Callable,Tuple{Vararg{Char}},AbstractVector{Char},Set{Char}}
 const TIS = Union{Char,AbstractString,Callable,Base.SubstitutionString}

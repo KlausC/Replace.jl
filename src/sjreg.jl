@@ -19,10 +19,10 @@ function replace_sjhand(s::AbstractString)
 
     io = IOBuffer()
     for c in s
-        if c == "a"
-            c = "A"
-        elseif c == "b"
-            c = "B"
+        if c == 'a'
+            c = 'A'
+        elseif c == 'b'
+            c = 'B'
         elseif islower(c)
             c = uppercase(c)
         end
