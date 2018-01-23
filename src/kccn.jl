@@ -259,7 +259,20 @@ function pat_repl_pair(p::Pair{<:TIF,<:TIS})::Pair{<:TF,<:TS}
     pat::TF  = consol_pattern(p.first)
     repl::TS = consol_repl(p.second)
     repl isa SubstitutionString && !(pat isa Regex) && error("substitution string requires regex")
+    repl = funtostring(pat, repl)
     pat === p.first && repl === p.second ? p : pat => repl
+end
+
+funtostring(pat::Base.EqualTo{Char}, fun::Callable) = stringfun(fun, pat.x)
+funtostring(pat::String, fun::Callable) = stringfun(fun, pat)
+funtostring(::Any, y) = y
+
+function stringfun(fun::Function, s::Union{Char,String})
+    if type_hasmethod(typeof(fun), (Char,)) && length(s) == 1
+        fun(s[1])
+    else
+        fun(string(s))
+    end
 end
 
 end # module ReplaceImpl
