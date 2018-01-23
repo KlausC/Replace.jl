@@ -1,5 +1,6 @@
 
 export hard, soft, soft_intern, soft_unrolled_intern, soft_unrolled
+export soft_fcm, sof_fcm_intern
 export exchange!, substitute!, substitute
 
 # hard coded function calls in inner loop
@@ -17,7 +18,7 @@ end
 
 # the same functionality, more flexible with a list of
 # functions as arguments
-# performance is 
+# performance is 4 times worse - many allocations 
 function soft_intern(s::String, funlist::Function...)
     io = IOBuffer()
     for c in s
@@ -34,7 +35,7 @@ function soft(s::String)
     soft_intern(s, lowercase, c->c+20, uppercase, c->c-20)
 end
 
-# an attempt to improve perfomance
+# an attempt to improve perfomance using `eval`
 # works!
 function soft_unrolled_intern(funlist::Function...)
 
@@ -133,5 +134,35 @@ end
 
 function exchange!(code::Any, dummy::Any, replacement::Any)
     code == dummy ? replacement : code
+end
+
+"""
+    An attempt to use 'first-class-methods'
+"""
+
+struct FCM{T<:Function} <: Function
+    f::T
+end
+FCM(f::Function) = FCM{typeof(f)}(f)
+
+function (f::FCM)(a::Char)::Char
+    ff = f.f
+    ff(a)::Char
+end
+
+function soft_fcm_intern(s::String, funlist::FCM...)
+    io = IOBuffer()
+    for c in s
+        for fun in funlist
+            c = fun(c)::Char
+        end
+        write(io, c)
+    end
+    String(take!(io))
+end
+
+# make use of the flexible implementation
+function soft_fcm(s::String)
+    soft_fcm_intern(s, FCM.((lowercase, c->c+20, uppercase, c->c-20))...)
 end
 
