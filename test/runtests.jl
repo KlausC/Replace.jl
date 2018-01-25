@@ -2,7 +2,7 @@ using Replace
 using Test
 using Unicode
 
-replace = replace_kcon
+replace = replace2
 
 @testset "replace" begin
     @test replace("\u2202", '*' => '\0') == "\u2202"
@@ -145,8 +145,8 @@ replace = replace_kcon
         @test replace(s, "q"=>"z", islower=>uppercase, 'r'=>'x') == "zUICK zUICKER zUICKEST"
         @test replace(s, "qui"=>"A", 'r'=>'x', islower=>uppercase) == "ACK ACKEx ACKEST"
         @test replace(s, "qui"=>"A", 'r'=>'x', islower=>uppercase) == "ACK ACKEx ACKEST"
-        @test replace(s, r"q"=>"z", islower=>uppercase, 'r'=>'x') == "QUICK QUICKER QUICKEST"
-        @test_throws ErrorException("type String has no field match_data") replace(s, "q"=>s"a\1b")
+        @test replace(s, r"q"=>"z", islower=>uppercase, 'r'=>'x') == "zUICK zUICKER zUICKEST"
+        @test_throws ErrorException("substitution string requires regex") replace(s, "q"=>s"a\1b")
         @test_throws ErrorException("PCRE error: unknown substring") replace(s, r"q"=>s"a\1b")
     end
 

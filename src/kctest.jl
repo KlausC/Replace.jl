@@ -143,7 +143,6 @@ end
 struct FCM{T<:Function} <: Function
     f::T
 end
-FCM(f::Function) = FCM{typeof(f)}(f)
 
 function (f::FCM)(a::Char)::Char
     ff = f.f
