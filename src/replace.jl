@@ -1,7 +1,16 @@
+# This file is a part of Julia. License is MIT: https://julialang.org/license
 
-export replace_kccn
+# This file depends on base/regex.jl and base/show.jl
+# and needs to follow these in base/sysimg.jl
 
+export replace2
+
+"""
+    Module to implement replace method with multiple pairs of patterns-replacements
+"""
 module ReplaceImpl
+
+export replace_code
 import Base: Callable, SubstitutionString
 
 # types of input patterns
@@ -15,7 +24,7 @@ const TF = Union{Regex,String,Callable}
 # types output patterns are converted to
 const TS = Union{Char,String,Callable,SubstitutionString}
 
-# from reflection.jl::hasmethod 
+# from reflection.jl::hasmethod
 function type_hasmethod(@nospecialize(ft::DataType), @nospecialize(t), world=typemax(UInt))
     t = Tuple{ft, t...}
     ccall(:jl_method_exists, Cint, (Any, Any, UInt), ft.name.mt, t, world) != 0
@@ -78,7 +87,7 @@ function gen_pattern(pri::Int, ::Type{<:Pair{<:Function}})
             $(gen_min_max(pri))
         end
     end
-    ) 
+    )
 end
 
 # generate code to calculate minj, maxk, and minp
@@ -102,7 +111,7 @@ end
 # generate code to access variables
 getpr(k::Int, pri::Int) = Symbol("pr", k, "_", pri)
 setpr(k::Int, pri::Int, j) = Expr(:(=), getpr(k, pri), j)
-setprall(k::Int, n::Int) = [setpr(k, i, 0) for i = 1:n] 
+setprall(k::Int, n::Int) = [setpr(k, i, 0) for i = 1:n]
 
 getpa(pri::Int) = Symbol("pa_", pri)
 setpa(pri::Int, T::Type, j) = Expr(:(=), Expr(:(::), getpa(pri), T), j)
@@ -169,7 +178,7 @@ function replace_gen_impl(str::Type{String}, count::Type{Int}, pat_repls...)
     quote
         begin
             # The following local variables occur once per pair
-            $(setpaall(pat_repls)...)       # patterns 
+            $(setpaall(pat_repls)...)       # patterns
             $(setpavecall(pat_repls)...)    # UInt8-vector forms of string pattern
             $(setreall(pat_repls)...)       # replacements
             $(setprall(1, n)...)            # next start of match
@@ -280,10 +289,6 @@ function stringfun(fun::Function, s::Union{Char,String})
     end
 end
 
-end # module ReplaceImpl
-
-import .ReplaceImpl: pat_repl_pair, is_modify, replace_gen
-
 function check_args(str::String, count::Int, pat_repls::Pair...)
     count < 0 && throw(DomainError(count, "`count` must be non-negative."))
     count == 0 || length(pat_repls) == 0
@@ -293,19 +298,21 @@ function consolidate_args(pat_repls::Pair...)
     filter!(is_modify, collect(Pair, pat_repl_pair.(pat_repls)))
 end
 
-# cover the multiple pairs case
-function replace_kccn(str::String, pat_repls::Pair...)
-    count::Integer=typemax(Int)
-    count = Int(count)
-    check_args(str, count, pat_repls...) && return str
-    pat_repls2 = consolidate_args(pat_repls...)
-    length(pat_repls2) == 0 && return str
-    replace_gen(str, count, pat_repls2...)
-end
 function replace_code(str::String, pat_repls::Pair...; count::Int=typemax(Int))
     check_args(str, count, pat_repls...) && return :str
     pat_repls2 = consolidate_args(pat_repls...)
     length(pat_repls2) == 0 && return :str
     ReplaceImpl.replace_gen_impl(typeof(str), Int, typeof.(pat_repls2)...)
+end
+
+end # module ReplaceImpl
+
+# cover the multiple pairs case
+function replace2(str::AbstractString, pat_repls::Pair...; count::Integer=typemax(Int))
+    count = Int(clamp(count, typemin(Int), typemax(Int)))
+    ReplaceImpl.check_args(str, count, pat_repls...) && return str
+    pat_repls2 = ReplaceImpl.consolidate_args(pat_repls...)
+    length(pat_repls2) == 0 && return str
+    ReplaceImpl.replace_gen(String(str), count, pat_repls2...)
 end
 

@@ -2,6 +2,7 @@ module Replace
 
 using Unicode
 
+include("replace.jl")
 include("kctest.jl")
 include("kcan.jl")
 include("kcbn.jl")
