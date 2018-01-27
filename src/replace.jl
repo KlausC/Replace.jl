@@ -295,8 +295,10 @@ function pat_repl_pair(p::Pair{<:TIF,<:TIS})::Pair{<:TF,<:TS}
     pat === p.first && repl === p.second ? p : pat => repl
 end
 
+funtostring(p::Pair) = Pair(p.first, funtostring(p.first, p.second))
+
 funtostring(pat::Base.EqualTo{Char}, fun::Callable) = stringfun(fun, pat.x)
-funtostring(pat::String, fun::Callable) = stringfun(fun, pat)
+funtostring(pat::Union{Char,String}, fun::Callable) = stringfun(fun, pat)
 funtostring(::Any, y) = y
 
 function stringfun(fun::Callable, s::Union{Char,String})
@@ -313,7 +315,11 @@ function check_args(str::String, count::Int, pat_repls::Pair...)
 end
 
 function consolidate_args(pat_repls::Pair...)
-    filter!(is_modify, collect(Pair, pat_repl_pair.(pat_repls)))
+    pairs = collect(Pair, pat_repl_pair.(pat_repls))
+    pairs = expand_pairs(pairs)
+    pairs = funtostring.(pairs)
+    filter!(is_modify, pairs)
+    condense_pairs(pairs)
 end
 
 """
@@ -327,6 +333,8 @@ function replace_code(str::String, pat_repls::Pair...; count::Int=typemax(Int))
     length(pat_repls2) == 0 && return :str
     ReplaceImpl.replace_gen_impl(typeof(str), Int, typeof.(pat_repls2)...)
 end
+
+include("condense.jl")
 
 end # module ReplaceImpl
 

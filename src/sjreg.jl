@@ -18,7 +18,7 @@ end
 function replace_sjhand(s::AbstractString)
     io = IOBuffer()
     for c in s
-        if c == 'a'
+        if c == 'x'
             c = 'A'
         elseif c == 'b'
             c = 'B'
