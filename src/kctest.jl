@@ -1,5 +1,5 @@
 
-export hard, soft, soft_intern, soft_unrolled_intern, soft_unrolled
+export hard, soft, soft_intern, soft2, soft2_intern, soft_unrolled_intern, soft_unrolled
 export soft_fcm, sof_fcm_intern
 export exchange!, substitute!, substitute
 
@@ -16,14 +16,14 @@ function hard(s::String)
     String(take!(io))
 end
 
-# the same functionality, more flexible with a list of
+# the same functionality, more flexible with a vararg list of
 # functions as arguments
 # performance is 4 times worse - many allocations 
 function soft_intern(s::String, funlist::Function...)
     io = IOBuffer()
     for c in s
         for fun in funlist
-            c = fun(c)
+            c = fun(c)::Char
         end
         write(io, c)
     end
@@ -33,6 +33,26 @@ end
 # make use of the flexible implementation
 function soft(s::String)
     soft_intern(s, lowercase, c->c+20, uppercase, c->c-20)
+end
+
+# the same functionality, more flexible with a vector of
+# functions as arguments
+# performance is 4 times worse - many allocations 
+function soft2_intern(s::String, funlist::Vector{Function})
+    io = IOBuffer()
+    for c in s
+        for fun in funlist
+            c = fun(c)::Char
+        end
+        write(io, c)
+    end
+    String(take!(io))
+end
+
+# make use of the flexible implementation
+function soft2(s::String)
+    funlist = [lowercase, c->c+20, uppercase, c->c-20]
+    soft2_intern(s, funlist)
 end
 
 # an attempt to improve perfomance using `eval`
@@ -144,12 +164,12 @@ struct FCM{T<:Function} <: Function
     f::T
 end
 
-function (f::FCM)(a::Char)::Char
+function (f::FCM{T})(a::Char)::Char where T<:Function
     ff = f.f
     ff(a)::Char
 end
 
-function soft_fcm_intern(s::String, funlist::FCM...)
+@inline function soft_fcm_intern(s::String, funlist::FCM...)
     io = IOBuffer()
     for c in s
         for fun in funlist

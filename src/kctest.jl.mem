@@ -1,0 +1,188 @@
+        - 
+        - export hard, soft, soft_intern, soft2, soft2_intern, soft_unrolled_intern, soft_unrolled
+        - export soft_fcm, sof_fcm_intern
+        - export exchange!, substitute!, substitute
+        - 
+        - # hard coded function calls in inner loop
+        - function hard(s::String)
+        0     io = IOBuffer()
+        0     for c in s
+        0         c = lowercase(c)
+        0         c = c + 20
+        0         c = uppercase(c)
+        0         c = c - 20
+ 16779568         write(io, c)
+        -     end
+       96     String(take!(io))
+        - end
+        - 
+        - # the same functionality, more flexible with a vararg list of
+        - # functions as arguments
+        - # performance is 4 times worse - many allocations 
+        - function soft_intern(s::String, funlist::Function...)
+        0     io = IOBuffer()
+        0     for c in s
+        0         for fun in funlist
+232078464             c = fun(c)::Char
+        -         end
+ 29362736         write(io, c)
+        -     end
+       96     String(take!(io))
+        - end
+        - 
+        - # make use of the flexible implementation
+        - function soft(s::String)
+ 77359488     soft_intern(s, lowercase, c->c+20, uppercase, c->c-20)
+        - end
+        - 
+        - # the same functionality, more flexible with a vector of
+        - # functions as arguments
+        - # performance is 4 times worse - many allocations 
+        - function soft2_intern(s::String, funlist::Vector{Function})
+        0     io = IOBuffer()
+        0     for c in s
+        0         for fun in funlist
+232078464             c = fun(c)::Char
+        -         end
+ 29362736         write(io, c)
+        -     end
+       96     String(take!(io))
+        - end
+        - 
+        - # make use of the flexible implementation
+        - function soft2(s::String)
+ 77359488     funlist = [lowercase, c->c+20, uppercase, c->c-20]
+        0     soft2_intern(s, funlist)
+        - end
+        - 
+        - # an attempt to improve perfomance using `eval`
+        - # works!
+        - function soft_unrolled_intern(funlist::Function...)
+        - 
+        -     function code_for_funcall(fun::Function)
+        -         :( c = $(fun)(c) )
+        -     end
+        -     function unrolled()
+        -         Expr(:block, code_for_funcall.(funlist)...)
+        -     end
+        - 
+        -     ex = :(
+        -        (s::String) ->
+        -        let c::Char, io = IOBuffer()
+        -            for c in s
+        -                $(unrolled())
+        -                write(io, c)
+        -            end
+        -            String(take!(io))
+        -        end
+        -     )
+        -     f = eval(ex)
+        -     (x) -> Base.invokelatest(f, x)
+        - end
+        - 
+        - """
+        - 
+        -     soft_unrolled(s::String)
+        - 
+        - The following data show the timing, which is achieved by the different implementations.
+        - When the function is generated, and executed separately, perfomance is
+        - as good as the hard-coded version!
+        - 
+        - ```jldoctest
+        - julia> srand(0); s = randstring(10^7);
+        - 
+        - julia> @time hard(s);
+        -   0.497349 seconds (13.58 k allocations: 16.785 MiB)
+        - 
+        - julia> @time hard(s);
+        -   0.469577 seconds (28 allocations: 16.003 MiB)
+        - 
+        - julia> @time soft(s);
+        -   2.087998 seconds (9.70 M allocations: 165.476 MiB, 2.98% gc time)
+        - 
+        - julia> @time soft(s);
+        -   2.015281 seconds (9.67 M allocations: 171.554 MiB, 2.53% gc time)
+        - 
+        - julia> @time soft_unrolled(s);
+        -   0.568373 seconds (38.56 k allocations: 18.327 MiB)
+        - 
+        - julia> @time soft_unrolled(s);
+        -   0.506165 seconds (19.58 k allocations: 17.188 MiB, 4.41% gc time)
+        - 
+        - julia> @time ex = soft_unrolled_intern(lowercase, c->c+20, uppercase, c->c-20)
+        -   0.020691 seconds (6.41 k allocations: 413.712 KiB)
+        - #5 (generic function with 1 method)
+        - 
+        - julia> @time ex(s);
+        -   0.565612 seconds (19.58 k allocations: 17.129 MiB, 9.19% gc time)
+        - 
+        - julia> @time ex(s);
+        -   0.477627 seconds (37 allocations: 16.003 MiB)
+        - 
+        - julia> @time ex(s);
+        -   0.479458 seconds (37 allocations: 16.003 MiB)
+        - """
+        - function soft_unrolled(s::String)
+        -     soft_unrolled_intern(lowercase, c->c+20, uppercase, c->c-20)(s)
+        - end
+        - 
+        - # make that generic
+        - function substitute!(outer::Expr, critical, list)
+        -     function code_for_funcall(element)
+        -         exchange!(deepcopy(critical), :( :REPLACE ), :( $element ))
+        -     end
+        - 
+        -     function unrolled()
+        -         Expr(:block, code_for_funcall.(list)...)
+        -     end
+        - 
+        -     exchange(outer, :( :BLOCK ), unrolled())
+        - end
+        - 
+        - substitute(outer::Expr, critical, list) = substitute!(deepcopy(outer), critical, list)
+        - 
+        - function exchange!(code::Expr, dummy, replacement) 
+        -     if dummy == code
+        -         replacement
+        -     else
+        -         for i = 1:length(code.args)
+        -             code.args[i] = exchange(code.args[i], dummy, replacement)
+        -         end
+        -     end
+        -     code
+        - end
+        - 
+        - function exchange!(code::Any, dummy::Any, replacement::Any)
+        -     code == dummy ? replacement : code
+        - end
+        - 
+        - """
+        -     An attempt to use 'first-class-methods'
+        - """
+        - 
+        - struct FCM{T<:Function} <: Function
+        -     f::T
+        - end
+        - 
+        - function (f::FCM{T})(a::Char)::Char where T<:Function
+        -     ff = f.f
+        -     ff(a)::Char
+        - end
+        - 
+        - @inline function soft_fcm_intern(s::String, funlist::FCM...)
+        -     io = IOBuffer()
+        -     for c in s
+        -         for fun in funlist
+        -             c = fun(c)::Char
+        -         end
+        -         write(io, c)
+        -     end
+        -     String(take!(io))
+        - end
+        - 
+        - # make use of the flexible implementation
+        - function soft_fcm(s::String)
+        -     soft_fcm_intern(s, FCM.((lowercase, c->c+20, uppercase, c->c-20))...)
+        - end
+        - 
+        - 
